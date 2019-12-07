@@ -1,8 +1,6 @@
 /**
- * wchain-一个流式中间件调用框架
- * TODO:文档——建议的中间件定义方法：使用一个函数返回中间件，固定的参数放外层函数，运行时变动的参数用meta传递*/
+ * wchain-一个流式中间件调用框架*/
 
-const events = require("events");
 const StreamFaucet = require("./StreamFaucet");
 const {Readable} = require("stream");
 const OptionList = require("./OptionList");
@@ -18,8 +16,6 @@ module.exports = function (options = OptionList) {
     for (let key in OptionList)//统一设置
         if (options[key] === undefined)
             options[key] = OptionList[key];
-
-    let wchain = null;
 
     let middlewares = [];//中间件列表
 
@@ -82,10 +78,10 @@ module.exports = function (options = OptionList) {
      * @param next 调用下一个中间件的函数
      * @param end 此中间件处理完成时调用的函数
      */
-    wchain = (meta, stream, next, end) => {
+    function wchain(meta, stream, next, end) {
         //则使用内部定义的单独事件触发器（触发器的定义在下面）
         run(meta, stream, next, end);//其实就是运行
-    };
+    }
 
     //wchain就是wchain
     wchain.run = run;

@@ -1,12 +1,4 @@
 const OptionList = {
-    /**
-     * 是否使用单独的事件触发器
-     * 当作为中间件使用时，wchain可以选择是否使用其父wchain的emitter作为事件触发器
-     * 如果此项为true，则使用父wchain的emitter，事件能用父wchain的on监听到
-     * 如果此项为false，则使用自己独立的emitter，事件只能用自己的on监听到事件
-     * 默认为false
-     */
-    isolate_emitter: true,
 
     /**
      * 启动时是否暂停流
