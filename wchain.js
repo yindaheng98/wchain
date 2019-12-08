@@ -51,7 +51,7 @@ module.exports = function (options = OptionList) {
         chain[middlewares.length] = next;//调用链的末尾是下一个调用链
         for (let i = middlewares.length - 1; i >= 0; i--) {
             //从调用链的末尾开始依次构造调用链（一级一级地定义流的流动顺序）
-            chain[i] = async (processedStream) => {
+            chain[i] = (processedStream) => {
                 if (options.pause_at_begin && processedStream instanceof Readable) {//如果需要在一开始就停止
                     //那就在每一层中间加一个暂停的水龙头
                     let faucet = new StreamFaucet();
@@ -59,18 +59,20 @@ module.exports = function (options = OptionList) {
                     processedStream.pipe(faucet);
                     processedStream = faucet;
                 }
-                await middlewares[i](meta, processedStream, chain[i + 1],
-                    () => {
-                        ends[i] = true;//将第i标志位置true
-                        for (let j = 0; j < middlewares.length; j++)//依次扫描标志位
-                            if (ends[j] !== true) return;//如果有一个不为true则说明有中间件没完成
-                        end();//全部为true则说明全部完成
-                    });
+                (async function () {
+                    await middlewares[i](meta, processedStream, chain[i + 1],
+                        () => {
+                            ends[i] = true;//将第i标志位置true
+                            for (let j = 0; j < middlewares.length; j++)//依次扫描标志位
+                                if (ends[j] !== true) return;//如果有一个不为true则说明有中间件没完成
+                            end();//全部为true则说明全部完成
+                        });
+                })().catch((e) => {
+                    throw e;
+                });
             };
         }
-        chain[0](stream).catch((e) => {
-            throw e
-        });
+        chain[0](stream)
     }
 
     /**
