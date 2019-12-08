@@ -106,7 +106,7 @@ function ReadfilePromise(meta, stream, next, end) {
 }
 ```
 
-Above from ES7, two powerful keywords was added: async/await. And after wchain 1.1.0, you could use async/await in middleware with ease:
+Above from ES7, two powerful keywords was added: async/await. And after wchain 1.2.0, you could use async/await in middleware with ease:
 
 ```javascript
 async function ReadfileAwait(meta, stream, next, end) {
