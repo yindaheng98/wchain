@@ -25,7 +25,7 @@ A wchain middleware is a function with 4 inputs:
 * `meta`: A object. It contains all the input for the middleware except the stream input. It will been input by the user when the wchain running.
 * `stream`: A stream. It is the stream input for the middleware. It will been input by previous middleware when the wchain running.
 * `next`: A function with 1 input. When you finished constructing your middleware, you **must** call this function. The input of this function is the stream you want to input to next middleware.
-* `end`: A function with no input. In most cases, `next(stream)` have been called in a middleware does not mean the process in the middleware was finished —— because the stream is asynchronous. You **must** call this function when the stream process is ended or wchain will not exit.
+* `end`: A function with no input. In most cases, `next(stream)` have been called in a middleware does not mean the process in the middleware was finished —— because the stream is asynchronous. You **must** call this function when the stream process is ended or wchain will not exit. Besides, if you are using event emitter, it is recommanded that when to call `end()` should be determine **before** call `next(stream)`
 
 Here are some example of defining a wchain middleware.
 
@@ -35,8 +35,8 @@ First is a very simple middleware to get a file path from the `meta` and read th
 function Readfile(meta, stream, next, end) {
     let path = meta.read_from;
     stream = fs.createReadStream(path);
-    next(stream);//When the constructing is over, call the next(stream) to deliver the stream to next middleware
     stream.on("end", end);//When file is ended, call the end()
+    next(stream);//When the constructing is over, call the next(stream) to deliver the stream to next middleware
 }
 ```
 
@@ -68,6 +68,54 @@ function HashMiddleware(encoding) {
         });
         next(stream);
     }
+}
+```
+
+#### How if I want to include acync/await into a middleware
+
+Sometimes you would want to use some asynchronous functions in middleware. For example, if I want to confirm that a file is exists before read the file, I will define a Promise function to determine the existance:
+
+```javascript
+function FileExists(path){
+    return new Promise((resolve, reject) => {
+        fs.stat(path,(err, stats) => {
+            if (err) {//如果出错
+                if (err.code === "ENOENT")//如果是不存在
+                    return resolve(false);//返回false
+                return reject(err);//否则报错
+            }
+            return resolve(true);
+        })
+    })
+}
+```
+
+Undoubted that `Readfile` middleware can be reformed the like this:
+
+```javascript
+function ReadfilePromise(meta, stream, next, end) {
+    let path = meta.file.path;
+    FileExists(path).then((ex) => {
+        if (ex) stream = fs.createReadStream(path);
+        else throw new Error("File not exists!");
+        stream.on("end", end);
+        next(stream);
+    }).catch((e) => {
+        throw e
+    });
+}
+```
+
+Above from ES7, two powerful keywords was added: async/await. And after wchain 1.1.0, you could use async/await in middleware with ease:
+
+```javascript
+async function ReadfileAwait(meta, stream, next, end) {
+    let path = meta.file.path;
+    if (await FileExists(path))
+        stream = fs.createReadStream(path);
+    else throw new Error("File not exists!");
+    stream.on("end", end);
+    next(stream);
 }
 ```
 
@@ -118,7 +166,11 @@ let end = () => {
 Then wchain `crypto_wchain` above can run using `wchain.run`, like this:
 
 ```javascript
-crypto_wchain.run(meta, stream, next, end);
+try {
+    crypto_wchain.run(meta, stream, next, end);
+} catch (e) {
+    console.log(e)
+}
 ```
 
 Or it can also run like a middleware:
@@ -135,7 +187,7 @@ This feature make the wchain nestable. You can use the `crypto_wchain` just like
 another_wchain.use(crypto_wchain);
 ```
 
-### Change meta in middleware to shield details or avoid error
+### Change meta in middleware to shield low-level details or avoid error
 
 For example, someone defined a middleware to write the stream into a file, but unfortunately, it use the same field in the meta with `Readfile` middleware:
 
@@ -166,6 +218,6 @@ another_wchain.use(FilewriteMiddleware());
 
 Run the `another_wchain`, you will see the file was created correctly.
 
-## One more time
+## One more thing
 
 All the code above is the test code of this package. Run `npm test` to see the result.

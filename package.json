@@ -1,6 +1,6 @@
 {
   "name": "wchain",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "A middleware chain framework for processing streams and their meta data.",
   "main": "wchain.js",
   "scripts": {

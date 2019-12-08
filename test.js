@@ -5,8 +5,43 @@ const fs = require("fs");
 function Readfile(meta, stream, next, end) {
     let path = meta.file.path;
     stream = fs.createReadStream(path);
-    next(stream);
     stream.on("end", end);
+    next(stream);
+}
+
+function FileExists(path) {
+    return new Promise((resolve, reject) => {
+        fs.stat(path, (err, stats) => {
+            if (err) {//如果出错
+                if (err.code === "ENOENT")//如果是不存在
+                    return resolve(false);//返回false
+                return reject(err);//否则报错
+            }
+            return resolve(stats !== null);
+        })
+    })
+}
+
+function ReadfilePromise(meta, stream, next, end) {
+    let path = meta.file.path;
+    FileExists(path).then((ex) => {
+        console.log(ex);
+        if (ex) stream = fs.createReadStream(path);
+        else throw new Error("File not exists!");
+        stream.on("end", end);
+        next(stream);
+    }).catch((e) => {
+        throw e
+    });
+}
+
+async function ReadfileAwait(meta, stream, next, end) {
+    let path = meta.file.path;
+    if (await FileExists(path))
+        stream = fs.createReadStream(path);
+    else throw new Error("File not exists!");
+    stream.on("end", end);
+    next(stream);
 }
 
 function EncryptMiddleware(encoding) {
@@ -60,7 +95,11 @@ let next = (stream) => {
 let end = () => {
     console.log("\nThe crypto_wchain was ended.")
 };
-crypto_wchain.run(meta, stream, next, end);
+try {
+    crypto_wchain.run(meta, stream, next, end);
+} catch (e) {
+    console.log(e)
+}
 
 
 function FilewriteMiddleware() {
@@ -84,3 +123,26 @@ another_wchain.use(FilewriteMiddleware());
 another_wchain.run(meta, stream, next, () => {
     console.log("\nThe another_wchain was ended.")
 });
+
+
+let crypto_wchain_Promise = wchain({pause_at_begin: false});
+crypto_wchain_Promise.use(ReadfilePromise);
+crypto_wchain_Promise.use(HashMiddleware("hex"));
+crypto_wchain_Promise.use(EncryptMiddleware("hex"));
+//meta.file.path = "not exists";
+try {
+    crypto_wchain.run(meta, stream, next, end);
+} catch (e) {
+    console.log(e);
+}
+
+let crypto_wchain_Await = wchain({pause_at_begin: false});
+crypto_wchain_Await.use(ReadfileAwait);
+crypto_wchain_Await.use(HashMiddleware("hex"));
+crypto_wchain_Await.use(EncryptMiddleware("hex"));
+//meta.file.path = "not exists";
+try {
+    crypto_wchain.run(meta, stream, next, end);
+} catch (e) {
+    console.log(e);
+}
