@@ -91,7 +91,7 @@ let meta = {
     }
 };
 let stream = null;
-let next = (stream) => {
+let next = (meta, stream) => {
     stream.pipe(process.stdout)
 };
 let end = () => {
@@ -144,5 +144,9 @@ crypto_wchain_Await.use(EncryptMiddleware("hex"));
 meta.file.path = "not exists";
 crypto_wchain_Await.run(meta, stream, next, end).catch(e => {
     console.log("catched!");
+    console.log(e)
+});
+crypto_wchain_Await.run(meta, stream, next, end).catch(e => {
+    console.log("catched!33333333333333333333");
     console.log(e)
 });

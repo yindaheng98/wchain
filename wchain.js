@@ -14,13 +14,13 @@ const events = require("events");
  */
 module.exports = function (options = OptionList) {
 
+    options = JSON.parse(JSON.stringify(options));//二话不说先拷贝一份
+
     for (let key in OptionList)//统一设置
         if (options[key] === undefined)
             options[key] = OptionList[key];
 
     let middlewares = [];//中间件列表
-    let chain = [];//chain是用于组装中间件调用链的循环变量
-    let constructed = false;//是否已完成构造
 
     /**
      * 添加一个中间件，中间件将在run中按use的先后顺序被调用
@@ -36,7 +36,6 @@ module.exports = function (options = OptionList) {
      */
     function use(middleware) {
         middlewares.push(middleware);
-        constructed = false//每次添加中间件之后都需要重新构造
     }
 
     /**
@@ -55,27 +54,36 @@ module.exports = function (options = OptionList) {
         return stream;
     }
 
+    let chain = [];//chain是用于组装中间件调用链的循环变量
+    let constructed = false;//标记chain构造是否完成
+
     /**
      * 用于构造调用链
+     * 调用链是一个函数组成的数组，其入口是chain[0]
+     * chain[0]有三个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
+     * emitter参数用于接收外部emitter，之后所有的事件都将在此emitter上触发
      * @param next 指定调用链的最后一个next函数
      * @param endi 指定第i个中间件end完成后调用的函数
      * @param async_run 指定是否使用异步模式
-     * @param emitter 指定异步代码内的错误和完成事件应该在何处触发
      */
-    function construct(next, endi, async_run, emitter) {
-        if (constructed) return;//如果已经构造过了就直接返回
-        //没有构造过就构造
-        chain[middlewares.length] = async_run ? (meta, stream) => {
-            next(stream);
+    function construct(next, endi, async_run) {
+        if (constructed) return;//如果标记为已构造就直接返回
+        chain = [];//没有构造过就构造
+        chain[middlewares.length] = async_run ? (meta, stream, emitter) => {
+            next(meta, stream);
             emitter.emit("finish");//当使用异步模式的时候，调用链的末尾需要触发“完成”事件
         } : next;//不使用异步模式则不需要触发
         for (let i = middlewares.length - 1; i >= 0; i--) {
             //从调用链的末尾开始依次构造调用链（一级一级地定义流的流动顺序）
-            chain[i] = async_run ? async (processedMeta, processedStream) => {
+            chain[i] = async_run ? async (processedMeta, processedStream, emitter) => {
                 processedStream = make_faucet(processedStream);//在每一层中间加一个暂停的水龙头
                 (async function () {//异步模式用异步封装
                     try {
-                        await middlewares[i](processedMeta, processedStream, chain[i + 1], () => endi(i));
+                        await middlewares[i](
+                            processedMeta,
+                            processedStream,
+                            (meta, stream) => chain[i + 1](meta, stream, emitter),
+                            () => endi(i));
                     } catch (e) {
                         emitter.emit("error", e);
                     }
@@ -85,7 +93,7 @@ module.exports = function (options = OptionList) {
                 middlewares[i](processedMeta, processedStream, chain[i + 1], () => endi(i));
             };
         }
-        constructed = true;
+        constructed = true;//chain构造完成，设true
     }
 
     /**
@@ -98,7 +106,7 @@ module.exports = function (options = OptionList) {
      * 此函数将在隔绝模式下成为wchain的成员函数，而非隔绝模式下的wchain不能直接调用此函数
      */
     function run(meta, stream, next = () => null, end = () => null) {
-        //运行，按use的先后顺序调用中间件并传递触发器，其中的meta为待处理的非流式数据
+        //运行，按use的先后顺序调用中间件并传递触发器，其中的meta为非流式输入数据，stream为流式输入数据
 
         //ends用于记录每个中间件任务的完成情况（end()是否被调用）
         let ends = [], end_count = 0;
@@ -112,18 +120,40 @@ module.exports = function (options = OptionList) {
             end();//全部为true则说明全部完成，调用总的end()
         }
 
-        if (options.async_meta) {//如果使用异步模式
-            let emitter = new events.EventEmitter();
-            return new Promise((resolve, reject) => {//则返回一个Promise
-                emitter.on("error", reject);//在出错时reject
-                emitter.on("finish", resolve);//在完成时resolve
-                construct(next, endi, true, emitter);
-                chain[0](meta, stream);
-            });
-        } else {
+        if (!options.async_meta) {//如果不使用异步模式
             construct(next, endi, false);
-            return chain[0](meta, stream)
+            return chain[0](meta, stream);//那就简单点搞，直接构造
         }
+
+        //如果使用异步模式，则返回一个Promise，在chain[0]完成后resolve，出错时reject
+        let emitter = new events.EventEmitter();//每一次的run都是互相独立的，需要各自独立的emitter
+        return new Promise((resolve, reject) => {//则返回一个Promise
+            let end = false;//停止标记，保证resolve/reject二者只调用一次
+            emitter.once("error", (e) => {
+                if (!end) {
+                    end = true;//完成标记置true保证完成时只调用一次resolve
+                    return reject(e);//在出错时reject
+                }
+                let strange_error = function (e) {
+                    console.warn("A strange error occured after the run was finished: " + e);
+                };
+                strange_error(e);
+                emitter.on("error", strange_error);//第一次之后的事件全部输出警告
+            });
+            emitter.once("finish", () => {
+                if (!end) {
+                    end = true;//完成标记置true保证完成时只调用一次resolve
+                    return resolve();//在完成时resolve
+                }
+                let strange_finish = function () {
+                    console.warn("A strange finish emitted after the run was finished");
+                };
+                strange_finish();
+                emitter.on("finish", strange_finish);//第一次之后的事件全部输出警告
+            });
+            construct(next, endi, true);
+            chain[0](meta, stream, emitter);
+        });
     }
 
     /**
