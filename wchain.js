@@ -60,40 +60,64 @@ module.exports = function (options = OptionList) {
     /**
      * 用于构造调用链
      * 调用链是一个函数组成的数组，其入口是chain[0]
-     * chain[0]有三个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
+     * chain[0]有四个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
      * emitter参数用于接收外部emitter，之后所有的事件都将在此emitter上触发
+     * endi 指定第i个中间件end完成后调用的函数
      * @param next 指定调用链的最后一个next函数
-     * @param endi 指定第i个中间件end完成后调用的函数
      * @param async_run 指定是否使用异步模式
      */
-    function construct(next, endi, async_run) {
+    function construct(next, async_run) {
         if (constructed) return;//如果标记为已构造就直接返回
         chain = [];//没有构造过就构造
-        chain[middlewares.length] = async_run ? (meta, stream, emitter) => {
+        chain[middlewares.length] = async_run ? (meta, stream, endi, emitter) => {
             next(meta, stream);
             emitter.emit("finish");//当使用异步模式的时候，调用链的末尾需要触发“完成”事件
         } : next;//不使用异步模式则不需要触发
         for (let i = middlewares.length - 1; i >= 0; i--) {
             //从调用链的末尾开始依次构造调用链（一级一级地定义流的流动顺序）
-            chain[i] = async_run ? async (processedMeta, processedStream, emitter) => {
+            chain[i] = async_run ? async (processedMeta, processedStream, endi, emitter) => {
                 processedStream = make_faucet(processedStream);//在每一层中间加一个暂停的水龙头
                 (async function () {//异步模式用异步封装
                     try {
                         await middlewares[i](
                             processedMeta,
                             processedStream,
-                            (meta, stream) => chain[i + 1](meta, stream, emitter),
+                            (meta, stream) => chain[i + 1](meta, stream, endi, emitter),
                             () => endi(i));
                     } catch (e) {
                         emitter.emit("error", e);
                     }
                 })()
-            } : (processedMeta, processedStream) => {//否则就直接用同步封装
+            } : (processedMeta, processedStream, endi) => {//否则就直接用同步封装
                 processedStream = make_faucet(processedStream);
                 middlewares[i](processedMeta, processedStream, chain[i + 1], () => endi(i));
             };
         }
         constructed = true;//chain构造完成，设true
+    }
+
+    /**
+     * get_endi用于构造一个endi(i)函数，此函数可以被多次调用
+     * 每次调用endi(i)时，输入为一个整数i
+     * 直到所有的i∈[0,n-1]都被输入一遍后，最后一次调用时get_endi的输入参数end将被调用
+     * @param n 输入endi(i)的i的范围
+     * @param end 所有的i都输入一遍后调用什么
+     */
+    function get_endi(n, end) {
+        //ends用于记录每个中间件任务的完成情况（ends[i]的值表示endi(i)是否被调用）
+        let ends = [], end_count = 0;
+
+        function endi(i) {//当某个任务完成（end()被调用）后检查所有任务是否都已完成
+            ends[i] = true;//将第i标志位置true
+            end_count++;//end()计数
+            if (end_count >= n) {//至少要被每个调用n次才可能全部完成
+                for (let j = 0; j < n; j++)//依次扫描标志位
+                    if (ends[j] !== true) return;//如果有一个不为true则说明有i没被输入过
+                end();//全部为true则说明全部完成，调用最后的end()
+            }
+        }
+
+        return endi;
     }
 
     /**
@@ -108,30 +132,18 @@ module.exports = function (options = OptionList) {
     function run(meta, stream, next = () => null, end = () => null) {
         //运行，按use的先后顺序调用中间件并传递触发器，其中的meta为非流式输入数据，stream为流式输入数据
 
-        //ends用于记录每个中间件任务的完成情况（end()是否被调用）
-        let ends = [], end_count = 0;
-
-        function endi(i) {//当某个任务完成（end()被调用）后检查所有任务是否都已完成
-            ends[i] = true;//将第i标志位置true
-            end_count++;//end()计数
-            if (end_count >= middlewares.length)//end至少要被每个middlewares调用一次才可能全部完成
-                for (let j = 0; j < middlewares.length; j++)//依次扫描标志位
-                    if (ends[j] !== true) return;//如果有一个不为true则说明有中间件没完成
-            end();//全部为true则说明全部完成，调用总的end()
-        }
-
         if (!options.async_meta) {//如果不使用异步模式
-            construct(next, endi, false);
-            return chain[0](meta, stream);//那就简单点搞，直接构造
+            construct(next, false);
+            return chain[0](meta, stream, get_endi(middlewares.length, end));//那就简单点搞，直接构造
         }
 
         //如果使用异步模式，则返回一个Promise，在chain[0]完成后resolve，出错时reject
         let emitter = new events.EventEmitter();//每一次的run都是互相独立的，需要各自独立的emitter
         return new Promise((resolve, reject) => {//则返回一个Promise
-            let end = false;//停止标记，保证resolve/reject二者只调用一次
+            let isended = false;//停止标记，保证resolve/reject二者只调用一次
             emitter.once("error", (e) => {
-                if (!end) {
-                    end = true;//完成标记置true保证完成时只调用一次resolve
+                if (!isended) {
+                    isended = true;//完成标记置true保证完成时只调用一次resolve
                     return reject(e);//在出错时reject
                 }
                 let strange_error = function (e) {
@@ -141,8 +153,8 @@ module.exports = function (options = OptionList) {
                 emitter.on("error", strange_error);//第一次之后的事件全部输出警告
             });
             emitter.once("finish", () => {
-                if (!end) {
-                    end = true;//完成标记置true保证完成时只调用一次resolve
+                if (!isended) {
+                    isended = true;//完成标记置true保证完成时只调用一次resolve
                     return resolve();//在完成时resolve
                 }
                 let strange_finish = function () {
@@ -151,8 +163,8 @@ module.exports = function (options = OptionList) {
                 strange_finish();
                 emitter.on("finish", strange_finish);//第一次之后的事件全部输出警告
             });
-            construct(next, endi, true);
-            chain[0](meta, stream, emitter);
+            construct(next, true);
+            chain[0](meta, stream, get_endi(middlewares.length, end), emitter);
         });
     }
 
