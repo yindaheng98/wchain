@@ -6,7 +6,7 @@ function Readfile(meta, stream, next, end) {
     let path = meta.file.path;
     stream = fs.createReadStream(path);
     stream.on("end", end);
-    next(stream);
+    next(meta, stream);
 }
 
 function FileExists(path) {
@@ -24,14 +24,15 @@ function FileExists(path) {
 
 function ReadfilePromise(meta, stream, next, end) {
     let path = meta.file.path;
-    FileExists(path).then((ex) => {
-        if (ex) stream = fs.createReadStream(path);
-        else throw new Error("File not exists!");
-        stream.on("end", end);
-        next(stream);
-    }).catch((e) => {
-        throw e
-    });
+    return new Promise((resolve, reject) => {
+        FileExists(path).then((ex) => {
+            if (ex) stream = fs.createReadStream(path);
+            else return reject(new Error("File not exists!"));
+            stream.on("end", end);
+            next(meta, stream);
+            return resolve();
+        });
+    })
 }
 
 async function ReadfileAwait(meta, stream, next, end) {
@@ -40,23 +41,25 @@ async function ReadfileAwait(meta, stream, next, end) {
         stream = fs.createReadStream(path);
     } else throw new Error("File not exists!");
     stream.on("end", end);
-    next(stream);
+    next(meta, stream);
 }
 
 function EncryptMiddleware(encoding) {
     return function (meta, stream, next, end) {
+        let meta_next = meta;
         meta = meta["encrypt"];
         let crypto_stream = crypto.createCipheriv(meta.algorithm, meta.key, meta.iv);
         crypto_stream.setEncoding(encoding);
         crypto_stream.on("end", () => {
             end();
         });
-        next(stream.pipe(crypto_stream));
+        next(meta_next, stream.pipe(crypto_stream));
     }
 }
 
 function HashMiddleware(encoding) {
     return function (meta, stream, next, end) {
+        let meta_next = meta;
         meta = meta["hash"];
         let hash_stream = crypto.createHash(meta.algorithm);
         stream.pipe(hash_stream);
@@ -64,7 +67,7 @@ function HashMiddleware(encoding) {
             meta.onFinish(hash_stream.digest(encoding));
             end();
         });
-        next(stream);
+        next(meta_next, stream);
     }
 }
 
@@ -107,7 +110,7 @@ function FilewriteMiddleware() {
         let write_stream = fs.createWriteStream(meta.path);
         stream.on("end", end);
         stream.pipe(write_stream);
-        next(stream);
+        next(meta, stream);
     }
 }
 
@@ -115,7 +118,7 @@ let another_wchain = wchain();
 another_wchain.use(crypto_wchain);
 another_wchain.use((meta, stream, next, end) => {
     meta.file.path = "test/result.txt";
-    next(stream);
+    next(meta, stream);
     end();
 });
 another_wchain.use(FilewriteMiddleware());
@@ -129,19 +132,17 @@ crypto_wchain_Promise.use(ReadfilePromise);
 crypto_wchain_Promise.use(HashMiddleware("hex"));
 crypto_wchain_Promise.use(EncryptMiddleware("hex"));
 meta.file.path = "not exists";
-try {
-    crypto_wchain_Promise.run(meta, stream, next, end);
-} catch (e) {
-    console.log(e);
-}
+crypto_wchain_Promise.run(meta, stream, next, end).catch(e => {
+    console.log("catched!");
+    console.log(e)
+});
 
-let crypto_wchain_Await = wchain({pause_at_begin: false});
+let crypto_wchain_Await = wchain({async_meta: true});
 crypto_wchain_Await.use(ReadfileAwait);
 crypto_wchain_Await.use(HashMiddleware("hex"));
 crypto_wchain_Await.use(EncryptMiddleware("hex"));
 meta.file.path = "not exists";
-try {
-    crypto_wchain_Await.run(meta, stream, next, end);
-} catch (e) {
-    console.log(e);
-}
+crypto_wchain_Await.run(meta, stream, next, end).catch(e => {
+    console.log("catched!");
+    console.log(e)
+});

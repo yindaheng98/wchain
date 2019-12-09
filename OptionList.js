@@ -23,7 +23,15 @@ const OptionList = {
      * 中间件中的stream.pipe可以在一个异步里面，但是stream.pipe和它的next()必须是同步的
      * 如果一个中间件中的stream.pipe和它的next()都不是同步调用的话，那就真的没办法了
      */
-    pause_at_begin: true
+    pause_at_begin: true,
+
+    /**
+     * 是否在搭建调用链时使用异步
+     * 有时候您可能会将您的中间件函数定义为一个async代码块，
+     * 并将next()的调用放在一个异步代码中，这时您就需要开启此项以保证中间件函数中的错误能被正确捕捉
+     * 当开启此项后，wchain.run将返回一个Promise，完成和捕获错误需要用.then()和.catch()或try和await
+     */
+    async_meta: true
 };
 
 module.exports = OptionList;
