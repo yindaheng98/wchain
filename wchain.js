@@ -64,8 +64,8 @@ module.exports = function (options = OptionList) {
      *
      * 调用链入口是chain[0]。chain[0]有三个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
      * 输入的options中放置的是在运行时动态装入的设置参数，options目前有三个字段
-     * emitter参数用于接收外部emitter，之后所有的事件都将在此emitter上触发
      * last_next 指定调用链的最后一个next函数，此函数将顺着调用链一级一级传递到调用链末尾
+     * emitter参数用于接收外部emitter，之后所有的事件都将在此emitter上触发
      * endi 指定第i个中间件end完成后调用的函数，此参数专用于在每次run时给调用链输入独立的endi函数
      * @param async_run 指定是否使用异步模式
      */
