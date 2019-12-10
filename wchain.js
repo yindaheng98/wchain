@@ -58,39 +58,46 @@ module.exports = function (options = OptionList) {
     let constructed = false;//标记chain构造是否完成
 
     /**
-     * 用于构造调用链
-     * 调用链是一个函数组成的数组，其入口是chain[0]
-     * chain[0]有四个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
+     * 用于构造调用链。调用链是一个函数组成的数组，其中保存了所有的调用序列
+     * 注意：调用链只保存调用序列，所有与调用数据相关的东西都在运行时输入
+     * 可以说调用链是调用过程的模板，每次调用都依据此模板生成新的调用过程
+     *
+     * 调用链入口是chain[0]。chain[0]有三个参数，其中meta和stream用于接收上一层的next参数传递到下一层，
+     * 输入的options中放置的是在运行时动态装入的设置参数，options目前有三个字段
      * emitter参数用于接收外部emitter，之后所有的事件都将在此emitter上触发
-     * endi 指定第i个中间件end完成后调用的函数
-     * @param next 指定调用链的最后一个next函数
+     * last_next 指定调用链的最后一个next函数，此函数将顺着调用链一级一级传递到调用链末尾
+     * endi 指定第i个中间件end完成后调用的函数，此参数专用于在每次run时给调用链输入独立的endi函数
      * @param async_run 指定是否使用异步模式
      */
-    function construct(next, async_run) {
+    function construct(async_run) {
         if (constructed) return;//如果标记为已构造就直接返回
-        chain = [];//没有构造过就构造
-        chain[middlewares.length] = async_run ? (meta, stream, endi, emitter) => {
-            next(meta, stream);
-            emitter.emit("finish");//当使用异步模式的时候，调用链的末尾需要触发“完成”事件
-        } : next;//不使用异步模式则不需要触发
+        chain = [];//没有构造过就重新构造
+        chain[middlewares.length] = async_run ? (meta, stream, options) => {
+            options.last_next(meta, stream);
+            options.emitter.emit("finish");//当使用异步模式的时候，调用链的末尾需要触发“完成”事件
+        } : (meta, stream, options) => options.last_next(meta, stream);//不使用异步模式则不需要触发
         for (let i = middlewares.length - 1; i >= 0; i--) {
             //从调用链的末尾开始依次构造调用链（一级一级地定义流的流动顺序）
-            chain[i] = async_run ? async (processedMeta, processedStream, endi, emitter) => {
+            chain[i] = async_run ? async (processedMeta, processedStream, options) => {
                 processedStream = make_faucet(processedStream);//在每一层中间加一个暂停的水龙头
                 (async function () {//异步模式用异步封装
                     try {
                         await middlewares[i](
                             processedMeta,
                             processedStream,
-                            (meta, stream) => chain[i + 1](meta, stream, endi, emitter),
-                            () => endi(i));
+                            (meta, stream) => chain[i + 1](meta, stream, options),
+                            () => options.endi(i));
                     } catch (e) {
-                        emitter.emit("error", e);
+                        options.emitter.emit("error", e);
                     }
                 })()
-            } : (processedMeta, processedStream, endi) => {//否则就直接用同步封装
+            } : (processedMeta, processedStream, options) => {//否则就直接用同步封装
                 processedStream = make_faucet(processedStream);
-                middlewares[i](processedMeta, processedStream, chain[i + 1], () => endi(i));
+                middlewares[i](
+                    processedMeta,
+                    processedStream,
+                    (meta, stream) => chain[i + 1](meta, stream, options),
+                    () => options.endi(i));
             };
         }
         constructed = true;//chain构造完成，设true
@@ -133,8 +140,11 @@ module.exports = function (options = OptionList) {
         //运行，按use的先后顺序调用中间件并传递触发器，其中的meta为非流式输入数据，stream为流式输入数据
 
         if (!options.async_meta) {//如果不使用异步模式
-            construct(next, false);
-            return chain[0](meta, stream, get_endi(middlewares.length, end));//那就简单点搞，直接构造
+            construct(false);
+            return chain[0](meta, stream, {
+                last_next: next,
+                endi: get_endi(middlewares.length, end)
+            });//那就简单点搞，直接构造
         }
 
         //如果使用异步模式，则返回一个Promise，在chain[0]完成后resolve，出错时reject
@@ -163,8 +173,12 @@ module.exports = function (options = OptionList) {
                 strange_finish();
                 emitter.on("finish", strange_finish);//第一次之后的事件全部输出警告
             });
-            construct(next, true);
-            chain[0](meta, stream, get_endi(middlewares.length, end), emitter);
+            construct(true);
+            chain[0](meta, stream, {
+                last_next: next,
+                endi: get_endi(middlewares.length, end),
+                emitter
+            });
         });
     }
 
