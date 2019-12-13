@@ -191,7 +191,7 @@ module.exports = function (options = OptionList) {
      */
     function wchain(meta, stream, next, end) {
         //则使用内部定义的单独事件触发器（触发器的定义在下面）
-        run(meta, stream, next, end);//其实就是运行
+        return run(meta, stream, next, end);//其实就是运行
     }
 
     //wchain就是wchain

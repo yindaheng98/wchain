@@ -1,4 +1,4 @@
-# streams-processing-middleware
+# wchain: a streaming process middleware system
 
 ## Installation
 
@@ -89,9 +89,9 @@ That's it!
 
 ### How to run a wchain
 
-After define a wchain, next step is to make it running. Run a wchain is also very easy, just call the mechod `run`, and input the meta and the stream.
+After define a wchain, next step is to make it running. Run a wchain is also very easy, just call the method `run`, and input the meta and the stream.
 
-The function `wchain.use` have 4 inputs, just like a middleware. In fact, a wchain can itself used as a wchain middleware, which means that you could run a wchain like a middleware, or use a wchain as a input of another wchain's `use` method. For example, if we have 4 input variables `meta`, `stream`, `next`, `end`:
+The function `wchain.run` have 4 inputs, just like a middleware. In fact, a wchain can itself used as a wchain middleware, which means that you could run a wchain like a middleware, or use a wchain as a input of another wchain's `use` method. For example, if we have 4 input variables `meta`, `stream`, `next`, `end`:
 
 ```javascript
 let meta = {
